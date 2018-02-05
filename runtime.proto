@@ -1,0 +1,477 @@
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+//option java_multiple_files = true;
+//option java_package = "io.grpc.examples.runtimeservice";
+//option java_outer_classname = "RuntimeServiceProto";
+//option objc_class_prefix = "RTS";
+
+package runtime;
+
+// ref: https://gitlab.cncf.ci/kubernetes/kubernetes/blob/b6005337947a8de06518076a216af1a82e19e4fe/pkg/kubelet/api/v1alpha1/runtime/api.proto 
+service RuntimeService {
+    // Version returns the runtime name, runtime version, and runtime API version.
+    rpc Version(VersionRequest) returns (VersionResponse) {}
+
+    // RunPodSandbox creates and starts a pod-level sandbox. Runtimes must ensure
+    // the sandbox is in the ready state on success.
+    rpc RunPodSandbox(RunPodSandboxRequest) returns (RunPodSandboxResponse) {}
+
+    // CreateContainer creates a new container in specified PodSandbox
+    rpc CreateContainer(CreateContainerRequest) returns (CreateContainerResponse) {}
+
+}
+
+message VersionRequest {
+    // Version of the kubelet runtime API.
+    string version = 1;
+}
+
+message VersionResponse {
+    // Version of the kubelet runtime API.
+    string version = 1;
+    // Name of the container runtime.
+    string runtime_name = 2;
+    // Version of the container runtime. The string must be
+    // semver-compatible.
+    string runtime_version = 3;
+    // API version of the container runtime. The string must be
+    // semver-compatible.
+    string runtime_api_version = 4;
+}
+
+message RunPodSandboxRequest {
+    // The configuration for creating a PodSandbox.
+    PodSandboxConfig config = 1;
+}
+
+message RunPodSandboxResponse {
+    // The id of the PodSandbox
+    string pod_sandbox_id = 1;
+}
+
+message CreateContainerRequest {
+    // The id of the PodSandbox
+    string pod_sandbox_id = 1;
+    // The config of the container
+    ContainerConfig config = 2;
+    // The config of the PodSandbox. This is the same config that was passed
+    // to RunPodSandboxRequest to create the PodSandbox. It is passed again
+    // here just for easy reference. The PodSandboxConfig is immutable and
+    // remains the same throughout the lifetime of the pod.
+    PodSandboxConfig sandbox_config = 3;
+}
+
+message CreateContainerResponse {
+    // The id of the created container
+    string container_id = 1;
+}
+
+
+
+
+// PodSandboxConfig holds all the required and optional fields for creating a
+// sandbox.
+message PodSandboxConfig {
+    // Metadata of the sandbox. This information will uniquely identify the
+    // sandbox, and the runtime should leverage this to ensure correct
+    // operation. The runtime may also use this information to improve UX, such
+    // as by constructing a readable name.
+    PodSandboxMetadata metadata = 1;
+    // Hostname of the sandbox.
+    string hostname = 2;
+    // Path to the directory on the host in which container log files are
+    // stored.
+    // By default the log of a container going into the LogDirectory will be
+    // hooked up to STDOUT and STDERR. However, the LogDirectory may contain
+    // binary log files with structured logging data from the individual
+    // containers. For example, the files might be newline separated JSON
+    // structured logs, systemd-journald journal files, gRPC trace files, etc.
+    // E.g.,
+    //     PodSandboxConfig.LogDirectory = `/var/log/pods/<podUID>/`
+    //     ContainerConfig.LogPath = `containerName_Instance#.log`
+    //
+    // WARNING: Log management and how kubelet should interface with the
+    // container logs are under active discussion in
+    // https://issues.k8s.io/24677. There *may* be future change of direction
+    // for logging as the discussion carries on.
+    string log_directory = 3;
+    // DNS config for the sandbox.
+    DNSConfig dns_config = 4;
+    // Port mappings for the sandbox.
+    repeated PortMapping port_mappings = 5;
+    // Key-value pairs that may be used to scope and select individual resources.
+    map<string, string> labels = 6;
+    // Unstructured key-value map that may be set by the kubelet to store and
+    // retrieve arbitrary metadata. This will include any annotations set on a
+    // pod through the Kubernetes API.
+    //
+    // Annotations MUST NOT be altered by the runtime; the annotations stored
+    // here MUST be returned in the PodSandboxStatus associated with the pod
+    // this PodSandboxConfig creates.
+    //
+    // In general, in order to preserve a well-defined interface between the
+    // kubelet and the container runtime, annotations SHOULD NOT influence
+    // runtime behaviour.
+    //
+    // Annotations can also be useful for runtime authors to experiment with
+    // new features that are opaque to the Kubernetes APIs (both user-facing
+    // and the CRI). Whenever possible, however, runtime authors SHOULD
+    // consider proposing new typed fields for any new features instead.
+    map<string, string> annotations = 7;
+    // Optional configurations specific to Linux hosts.
+    LinuxPodSandboxConfig linux = 8;
+}
+
+// PodSandboxMetadata holds all necessary information for building the sandbox name.
+// The container runtime is encouraged to expose the metadata associated with the
+// PodSandbox in its user interface for better user experience. For example,
+// the runtime can construct a unique PodSandboxName based on the metadata.
+message PodSandboxMetadata {
+    // Pod name of the sandbox. Same as the pod name in the PodSpec.
+    string name = 1;
+    // Pod UID of the sandbox. Same as the pod UID in the PodSpec.
+    string uid = 2;
+    // Pod namespace of the sandbox. Same as the pod namespace in the PodSpec.
+    string namespace = 3;
+    // Attempt number of creating the sandbox. Default: 0.
+    uint32 attempt = 4;
+}
+
+// DNSConfig specifies the DNS servers and search domains of a sandbox.
+message DNSConfig {
+    // List of DNS servers of the cluster.
+    repeated string servers = 1;
+    // List of DNS search domains of the cluster.
+    repeated string searches = 2;
+    // List of DNS options. See https://linux.die.net/man/5/resolv.conf
+    // for all available options.
+    repeated string options = 3;
+}
+
+// PortMapping specifies the port mapping configurations of a sandbox.
+message PortMapping {
+    // Protocol of the port mapping.
+    Protocol protocol = 1;
+    // Port number within the container. Default: 0 (not specified).
+    int32 container_port = 2;
+    // Port number on the host. Default: 0 (not specified).
+    int32 host_port = 3;
+    // Host IP.
+    string host_ip = 4;
+}
+
+enum Protocol {
+    TCP = 0;
+    UDP = 1;
+}
+
+// LinuxPodSandboxConfig holds platform-specific configurations for Linux
+// host platforms and Linux-based containers.
+message LinuxPodSandboxConfig {
+    // Parent cgroup of the PodSandbox.
+    // The cgroupfs style syntax will be used, but the container runtime can
+    // convert it to systemd semantics if needed.
+    string cgroup_parent = 1;
+    // LinuxSandboxSecurityContext holds sandbox security attributes.
+    LinuxSandboxSecurityContext security_context = 2;
+    // Sysctls holds linux sysctls config for the sandbox.
+    map<string, string> sysctls = 3;
+}
+
+// LinuxSandboxSecurityContext holds linux security configuration that will be
+// applied to a sandbox. Note that:
+// 1) It does not apply to containers in the pods.
+// 2) It may not be applicable to a PodSandbox which does not contain any running
+//    process.
+message LinuxSandboxSecurityContext {
+    // Configurations for the sandbox's namespaces.
+    // This will be used only if the PodSandbox uses namespace for isolation.
+    NamespaceOption namespace_options = 1;
+    // Optional SELinux context to be applied.
+    SELinuxOption selinux_options = 2;
+    // UID to run sandbox processes as, when applicable.
+    Int64Value run_as_user = 3;
+    // If set, the root filesystem of the sandbox is read-only.
+    bool readonly_rootfs = 4;
+    // List of groups applied to the first process run in the sandbox, in
+    // addition to the sandbox's primary GID.
+    repeated int64 supplemental_groups = 5;
+    // Indicates whether the sandbox will be asked to run a privileged
+    // container. If a privileged container is to be executed within it, this
+    // MUST be true.
+    // This allows a sandbox to take additional security precautions if no
+    // privileged containers are expected to be run.
+    bool privileged = 6;
+    // Seccomp profile for the sandbox, candidate values are:
+    // * docker/default: the default profile for the docker container runtime
+    // * unconfined: unconfined profile, ie, no seccomp sandboxing
+    // * localhost/<full-path-to-profile>: the profile installed on the node.
+    //   <full-path-to-profile> is the full path of the profile.
+    // Default: "", which is identical with unconfined.
+    string seccomp_profile_path = 7;
+}
+
+// NamespaceOption provides options for Linux namespaces.
+message NamespaceOption {
+    // If set, use the host's network namespace.
+    bool host_network = 1;
+    // If set, use the host's PID namespace.
+    bool host_pid = 2;
+    // If set, use the host's IPC namespace.
+    bool host_ipc = 3;
+}
+
+// SELinuxOption are the labels to be applied to the container.
+message SELinuxOption {
+    string user = 1;
+    string role = 2;
+    string type = 3;
+    string level = 4;
+}
+
+// ContainerConfig holds all the required and optional fields for creating a
+// container.
+message ContainerConfig {
+    // Metadata of the container. This information will uniquely identify the
+    // container, and the runtime should leverage this to ensure correct
+    // operation. The runtime may also use this information to improve UX, such
+    // as by constructing a readable name.
+    ContainerMetadata metadata = 1 ;
+    // Image to use.
+    ImageSpec image = 2;
+    // Command to execute (i.e., entrypoint for docker)
+    repeated string command = 3;
+    // Args for the Command (i.e., command for docker)
+    repeated string args = 4;
+    // Current working directory of the command.
+    string working_dir = 5;
+    // List of environment variable to set in the container.
+    repeated KeyValue envs = 6;
+    // Mounts for the container.
+    repeated Mount mounts = 7;
+    // Devices for the container.
+    repeated Device devices = 8;
+    // Key-value pairs that may be used to scope and select individual resources.
+    // Label keys are of the form:
+    //     label-key ::= prefixed-name | name
+    //     prefixed-name ::= prefix '/' name
+    //     prefix ::= DNS_SUBDOMAIN
+    //     name ::= DNS_LABEL
+    map<string, string> labels = 9;
+    // Unstructured key-value map that may be used by the kubelet to store and
+    // retrieve arbitrary metadata.
+    //
+    // Annotations MUST NOT be altered by the runtime; the annotations stored
+    // here MUST be returned in the ContainerStatus associated with the container
+    // this ContainerConfig creates.
+    //
+    // In general, in order to preserve a well-defined interface between the
+    // kubelet and the container runtime, annotations SHOULD NOT influence
+    // runtime behaviour.
+    map<string, string> annotations = 10;
+    // Path relative to PodSandboxConfig.LogDirectory for container to store
+    // the log (STDOUT and STDERR) on the host.
+    // E.g.,
+    //     PodSandboxConfig.LogDirectory = `/var/log/pods/<podUID>/`
+    //     ContainerConfig.LogPath = `containerName_Instance#.log`
+    //
+    // WARNING: Log management and how kubelet should interface with the
+    // container logs are under active discussion in
+    // https://issues.k8s.io/24677. There *may* be future change of direction
+    // for logging as the discussion carries on.
+    string log_path = 11;
+
+    // Variables for interactive containers, these have very specialized
+    // use-cases (e.g. debugging).
+    // TODO: Determine if we need to continue supporting these fields that are
+    // part of Kubernetes's Container Spec.
+    bool stdin = 12;
+    bool stdin_once = 13;
+    bool tty = 14;
+
+    // Configuration specific to Linux containers.
+    LinuxContainerConfig linux = 15;
+}
+
+// ContainerMetadata holds all necessary information for building the container
+// name. The container runtime is encouraged to expose the metadata in its user
+// interface for better user experience. E.g., runtime can construct a unique
+// container name based on the metadata. Note that (name, attempt) is unique
+// within a sandbox for the entire lifetime of the sandbox.
+message ContainerMetadata {
+    // Name of the container. Same as the container name in the PodSpec.
+    string name = 1;
+    // Attempt number of creating the container. Default: 0.
+    uint32 attempt = 2;
+}
+
+// ImageSpec is an internal representation of an image.  Currently, it wraps the
+// value of a Container's Image field (e.g. imageID or imageDigest), but in the
+// future it will include more detailed information about the different image types.
+message ImageSpec {
+    string image = 1;
+}
+
+message KeyValue {
+    string key = 1;
+    string value = 2;
+}
+
+// Mount specifies a host volume to mount into a container.
+message Mount {
+    // Path of the mount within the container.
+    string container_path = 1;
+    // Path of the mount on the host.
+    string host_path = 2;
+    // If set, the mount is read-only.
+    bool readonly = 3;
+    // If set, the mount needs SELinux relabeling.
+    bool selinux_relabel = 4;
+    // Requested propagation mode.
+    MountPropagation propagation = 5;
+}
+
+enum MountPropagation {
+    // No mount propagation ("private" in Linux terminology).
+    PROPAGATION_PRIVATE = 0;
+    // Mounts get propagated from the host to the container ("rslave" in Linux).
+    PROPAGATION_HOST_TO_CONTAINER = 1;
+    // Mounts get propagated from the host to the container and from the
+    // container to the host ("rshared" in Linux).
+    PROPAGATION_BIDIRECTIONAL = 2;
+}
+
+// Device specifies a host device to mount into a container.
+message Device {
+    // Path of the device within the container.
+    string container_path = 1;
+    // Path of the device on the host.
+    string host_path = 2;
+    // Cgroups permissions of the device, candidates are one or more of
+    // * r - allows container to read from the specified device.
+    // * w - allows container to write to the specified device.
+    // * m - allows container to create device files that do not yet exist.
+    string permissions = 3;
+}
+
+// Int64Value is the wrapper of int64.
+message Int64Value {
+    // The value.
+    int64 value = 1;
+}
+
+// UInt64Value is the wrapper of uint64.
+message UInt64Value {
+    // The value.
+    uint64 value = 1;
+}
+
+// LinuxContainerConfig contains platform-specific configuration for
+// Linux-based containers.
+message LinuxContainerConfig {
+    // Resources specification for the container.
+    LinuxContainerResources resources = 1;
+    // LinuxContainerSecurityContext configuration for the container.
+    LinuxContainerSecurityContext security_context = 2;
+}
+
+// LinuxContainerResources specifies Linux specific configuration for
+// resources.
+// TODO: Consider using Resources from opencontainers/runtime-spec/specs-go
+// directly.
+message LinuxContainerResources {
+    // CPU CFS (Completely Fair Scheduler) period. Default: 0 (not specified).
+    int64 cpu_period = 1;
+    // CPU CFS (Completely Fair Scheduler) quota. Default: 0 (not specified).
+    int64 cpu_quota = 2;
+    // CPU shares (relative weight vs. other containers). Default: 0 (not specified).
+    int64 cpu_shares = 3;
+    // Memory limit in bytes. Default: 0 (not specified).
+    int64 memory_limit_in_bytes = 4;
+    // OOMScoreAdj adjusts the oom-killer score. Default: 0 (not specified).
+    int64 oom_score_adj = 5;
+    // CpusetCpus constrains the allowed set of logical CPUs. Default: "" (not specified).
+    string cpuset_cpus = 6;
+    // CpusetMems constrains the allowed set of memory nodes. Default: "" (not specified).
+    string cpuset_mems = 7;
+}
+
+// LinuxContainerSecurityContext holds linux security configuration that will be applied to a container.
+message LinuxContainerSecurityContext {
+    // Capabilities to add or drop.
+    Capability capabilities = 1;
+    // If set, run container in privileged mode.
+    // Privileged mode is incompatible with the following options. If
+    // privileged is set, the following features MAY have no effect:
+    // 1. capabilities
+    // 2. selinux_options
+    // 4. seccomp
+    // 5. apparmor
+    //
+    // Privileged mode implies the following specific options are applied:
+    // 1. All capabilities are added.
+    // 2. Sensitive paths, such as kernel module paths within sysfs, are not masked.
+    // 3. Any sysfs and procfs mounts are mounted RW.
+    // 4. Apparmor confinement is not applied.
+    // 5. Seccomp restrictions are not applied.
+    // 6. The device cgroup does not restrict access to any devices.
+    // 7. All devices from the host's /dev are available within the container.
+    // 8. SELinux restrictions are not applied (e.g. label=disabled).
+    bool privileged = 2;
+    // Configurations for the container's namespaces.
+    // Only used if the container uses namespace for isolation.
+    NamespaceOption namespace_options = 3;
+    // SELinux context to be optionally applied.
+    SELinuxOption selinux_options = 4;
+    // UID to run the container process as. Only one of run_as_user and
+    // run_as_username can be specified at a time.
+    Int64Value run_as_user = 5;
+    // User name to run the container process as. If specified, the user MUST
+    // exist in the container image (i.e. in the /etc/passwd inside the image),
+    // and be resolved there by the runtime; otherwise, the runtime MUST error.
+    string run_as_username = 6;
+    // If set, the root filesystem of the container is read-only.
+    bool readonly_rootfs = 7;
+    // List of groups applied to the first process run in the container, in
+    // addition to the container's primary GID.
+    repeated int64 supplemental_groups = 8;
+    // AppArmor profile for the container, candidate values are:
+    // * runtime/default: equivalent to not specifying a profile.
+    // * unconfined: no profiles are loaded
+    // * localhost/<profile_name>: profile loaded on the node
+    //    (localhost) by name. The possible profile names are detailed at
+    //    http://wiki.apparmor.net/index.php/AppArmor_Core_Policy_Reference
+    string apparmor_profile = 9;
+    // Seccomp profile for the container, candidate values are:
+    // * docker/default: the default profile for the docker container runtime
+    // * unconfined: unconfined profile, ie, no seccomp sandboxing
+    // * localhost/<full-path-to-profile>: the profile installed on the node.
+    //   <full-path-to-profile> is the full path of the profile.
+    // Default: "", which is identical with unconfined.
+    string seccomp_profile_path = 10;
+    // no_new_privs defines if the flag for no_new_privs should be set on the
+    // container.
+    bool no_new_privs = 11;
+}
+
+// Capability contains the container capabilities to add or drop
+message Capability {
+    // List of capabilities to add.
+    repeated string add_capabilities = 1;
+    // List of capabilities to drop.
+    repeated string drop_capabilities = 2;
+}

@@ -1,0 +1,28 @@
+Haconiwa.define do |config|
+  # The container name and container's hostname:
+  config.name = "haconiwa-2d057697-testruby"
+  # The first process when invoking haconiwa run:
+  config.init_command = ["/usr/bin/ruby", "-run", "-e", "httpd", ".", "-p", "8000"]
+  # If your first process is a daemon, please explicitly daemonize by:
+  config.daemonize!
+
+  # The rootfs location on your host OS
+  # Pathname class is useful:
+  root = Pathname.new("/var/lib/haconiwa")
+  config.chroot_to root
+
+  # mount point configuration:
+  config.add_mount_point "tmpfs", to: root.join("tmp"), fs: "tmpfs"
+
+  # Share network etc files from host to contianer
+  # You can reuse /etc/netns/${netnsname}/* files:
+  config.mount_network_etc(root, host_root: "/etc")
+
+  # Re-mount specific filesystems under new container namespace
+  # These are recommended when namespaces such as pid and net are unshared:
+  config.mount_independent "procfs"
+  config.mount_independent "sysfs"
+  config.mount_independent "devtmpfs"
+  config.mount_independent "devpts"
+  config.mount_independent "shm"
+end
